@@ -46,13 +46,14 @@
 //!
 //! ```{rust}
 //! use semver::Version;
+//! use semver::DynamicId;
 //!
 //! assert!(Version::parse("1.2.3") == Ok(Version {
 //!    major: 1,
 //!    minor: 2,
 //!    patch: 3,
-//!    pre: vec!(),
-//!    build: vec!(),
+//!    pre: DynamicId(vec!()),
+//!    build: DynamicId(vec!()),
 //! }));
 //! ```
 //!
@@ -207,6 +208,8 @@ extern crate diesel;
 // just re-exporting the interface that we want.
 
 pub use version::Identifier::{AlphaNumeric, Numeric};
+pub use version::Identifiers::{Static as StaticId, Dynamic as DynamicId};
+pub use version::AlphaNumericValue::{Static as StaticVal, Dynamic as DynamicVal};
 pub use version::{Identifier, SemVerError, Version};
 pub use version_req::{ReqParseError, VersionReq};
 

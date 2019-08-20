@@ -35,14 +35,64 @@ pub enum Identifier {
     /// An identifier that's solely numbers.
     Numeric(u64),
     /// An identifier with letters and numbers.
-    AlphaNumeric(String),
+    AlphaNumeric(AlphaNumericValue),
+}
+
+/// A value for static or dynamic initialization.
+#[derive(Clone, Debug)]
+pub enum AlphaNumericValue {
+    /// Statically initialized value.
+    Static(&'static str),
+    /// Dynamically initialized value.
+    Dynamic(String)
+}
+
+impl std::cmp::Eq for AlphaNumericValue {}
+
+impl std::cmp::PartialEq for AlphaNumericValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.value() == other.value()
+    }
+}
+
+impl std::cmp::Ord for AlphaNumericValue {
+    fn cmp(&self, other: &AlphaNumericValue) -> Ordering {
+        self.value().cmp(&other.value())
+    }
+}
+
+impl std::cmp::PartialOrd for AlphaNumericValue {
+    fn partial_cmp(&self, other: &AlphaNumericValue) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::hash::Hash for AlphaNumericValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value().hash(state);
+    }
+}
+
+impl AlphaNumericValue {
+    fn value(&self) -> &str {
+        match &self {
+            AlphaNumericValue::Static(s) => &s,
+            AlphaNumericValue::Dynamic(s) => &s
+        }
+    }
+}
+
+impl std::fmt::Display for AlphaNumericValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value())
+    }
 }
 
 impl From<semver_parser::version::Identifier> for Identifier {
     fn from(other: semver_parser::version::Identifier) -> Identifier {
         match other {
             semver_parser::version::Identifier::Numeric(n) => Identifier::Numeric(n),
-            semver_parser::version::Identifier::AlphaNumeric(s) => Identifier::AlphaNumeric(s),
+            semver_parser::version::Identifier::AlphaNumeric(s) => Identifier::AlphaNumeric(AlphaNumericValue::Dynamic(s)),
         }
     }
 }
@@ -61,7 +111,7 @@ impl fmt::Display for Identifier {
 impl Serialize for Identifier {
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
-        S: Serializer,
+    S: Serializer,
     {
         // Serialize Identifier as a number or string.
         match *self {
@@ -75,7 +125,7 @@ impl Serialize for Identifier {
 impl<'de> Deserialize<'de> for Identifier {
     fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+    D: Deserializer<'de>,
     {
         struct IdentifierVisitor;
 
@@ -89,14 +139,14 @@ impl<'de> Deserialize<'de> for Identifier {
 
             fn visit_u64<E>(self, numeric: u64) -> result::Result<Self::Value, E>
             where
-                E: de::Error,
+            E: de::Error,
             {
                 Ok(Identifier::Numeric(numeric))
             }
 
             fn visit_str<E>(self, alphanumeric: &str) -> result::Result<Self::Value, E>
             where
-                E: de::Error,
+            E: de::Error,
             {
                 Ok(Identifier::AlphaNumeric(alphanumeric.to_owned()))
             }
@@ -120,9 +170,78 @@ pub struct Version {
     /// fixes are made.
     pub patch: u64,
     /// The pre-release version identifier, if one exists.
-    pub pre: Vec<Identifier>,
+    pub pre: Identifiers,
     /// The build metadata, ignored when determining version precedence.
-    pub build: Vec<Identifier>,
+    pub build: Identifiers,
+}
+
+/// Collection container for identifiers.
+#[derive(Clone, Debug)]
+pub enum Identifiers {
+    /// Statically initialized identifiers collection.
+    Static(&'static [Identifier]),
+    /// Dynamically initialized identifiers collection.
+    Dynamic(Vec<Identifier>)
+}
+
+impl std::cmp::Eq for Identifiers {}
+
+impl std::cmp::PartialEq for Identifiers {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_raw() == other.as_raw()
+    }
+}
+impl std::cmp::PartialEq<[Identifier]> for Identifiers {
+    fn eq(&self, other: &[Identifier]) -> bool {
+        self.as_raw() == other.to_vec()
+    }
+}
+impl std::cmp::PartialEq<Vec<Identifier>> for Identifiers {
+    fn eq(&self, other: &Vec<Identifier>) -> bool {
+        self.as_raw() == *other
+    }
+}
+
+impl std::cmp::Ord for Identifiers {
+    fn cmp(&self, other: &Identifiers) -> Ordering {
+        self.as_raw().cmp(&other.as_raw())
+    }
+}
+
+impl std::cmp::PartialOrd for Identifiers {
+    fn partial_cmp(&self, other: &Identifiers) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::hash::Hash for Identifiers {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_raw().hash(state);
+    }
+}
+
+impl Identifiers {
+    /// Take wrapped collection.
+    pub fn as_raw(&self) -> Vec<Identifier> {
+        match self {
+            Identifiers::Static(s) => s.to_vec(),
+            Identifiers::Dynamic(s) => s.to_owned()
+        }
+    }
+    /// Get length of wrapped collection.
+    pub fn len(&self) -> usize {
+        self.as_raw().len()
+    }
+    /// Check if wrapped collection is empty.
+    pub fn is_empty(&self) -> bool {
+        self.as_raw().is_empty()
+    }
+}
+
+impl std::fmt::Display for Identifiers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl From<semver_parser::version::Version> for Version {
@@ -131,8 +250,8 @@ impl From<semver_parser::version::Version> for Version {
             major: other.major,
             minor: other.minor,
             patch: other.patch,
-            pre: other.pre.into_iter().map(From::from).collect(),
-            build: other.build.into_iter().map(From::from).collect(),
+            pre: Identifiers::Dynamic(other.pre.into_iter().map(From::from).collect()),
+            build: Identifiers::Dynamic(other.build.into_iter().map(From::from).collect()),
         }
     }
 }
@@ -141,7 +260,7 @@ impl From<semver_parser::version::Version> for Version {
 impl Serialize for Version {
     fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
     where
-        S: Serializer,
+    S: Serializer,
     {
         // Serialize Version as a string.
         serializer.collect_str(self)
@@ -152,7 +271,7 @@ impl Serialize for Version {
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+    D: Deserializer<'de>,
     {
         struct VersionVisitor;
 
@@ -166,7 +285,7 @@ impl<'de> Deserialize<'de> for Version {
 
             fn visit_str<E>(self, v: &str) -> result::Result<Self::Value, E>
             where
-                E: de::Error,
+            E: de::Error,
             {
                 Version::parse(v).map_err(de::Error::custom)
             }
@@ -211,8 +330,8 @@ impl Version {
             major: major,
             minor: minor,
             patch: patch,
-            pre: Vec::new(),
-            build: Vec::new(),
+            pre: Identifiers::Static(&[]),
+            build: Identifiers::Static(&[]),
         }
     }
 
@@ -250,8 +369,8 @@ impl Version {
 
     /// Clears the build metadata
     fn clear_metadata(&mut self) {
-        self.build = Vec::new();
-        self.pre = Vec::new();
+        self.build = Identifiers::Dynamic(Vec::new());
+        self.pre = Identifiers::Dynamic(Vec::new());
     }
 
     /// Increments the patch number for this Version (Must be mutable)
@@ -282,7 +401,7 @@ impl Version {
 
     /// Checks to see if the current Version is in pre-release status
     pub fn is_prerelease(&self) -> bool {
-        !self.pre.is_empty()
+        !self.pre.as_raw().is_empty()
     }
 }
 
@@ -298,19 +417,20 @@ impl fmt::Display for Version {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut result = format!("{}.{}.{}", self.major, self.minor, self.patch);
-
-        if !self.pre.is_empty() {
+        let pv = self.pre.as_raw();
+        if !pv.is_empty() {
             result.push_str("-");
-            for (i, x) in self.pre.iter().enumerate() {
+            for (i, x) in pv.iter().enumerate() {
                 if i != 0 {
                     result.push_str(".");
                 }
                 result.push_str(format!("{}", x).as_ref());
             }
         }
-        if !self.build.is_empty() {
+        let bv = self.build.as_raw();
+        if !bv.is_empty() {
             result.push_str("+");
-            for (i, x) in self.build.iter().enumerate() {
+            for (i, x) in bv.iter().enumerate() {
                 if i != 0 {
                     result.push_str(".");
                 }
@@ -330,9 +450,9 @@ impl cmp::PartialEq for Version {
         // can exist such that !(v1 < v2) && !(v1 > v2) && v1 != v2, which
         // violate strict total ordering rules.
         self.major == other.major
-            && self.minor == other.minor
-            && self.patch == other.patch
-            && self.pre == other.pre
+        && self.minor == other.minor
+        && self.patch == other.patch
+        && self.pre == other.pre
     }
 }
 
@@ -390,9 +510,20 @@ impl From<(u64, u64, u64)> for Version {
 #[cfg(test)]
 mod tests {
     use super::Identifier;
+    use super::Identifiers;
+    use super::AlphaNumericValue;
     use super::SemVerError;
     use super::Version;
     use std::result;
+
+    #[allow(dead_code)]
+    const VERSION: Version = Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+        pre: Identifiers::Static(&[Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha"))]),
+        build: Identifiers::Static(&[]),
+    };
 
     #[test]
     fn test_parse() {
@@ -403,25 +534,25 @@ mod tests {
         assert_eq!(
             Version::parse(""),
             parse_error("Error parsing major identifier")
-        );
+            );
         assert_eq!(
             Version::parse("  "),
             parse_error("Error parsing major identifier")
-        );
+            );
         assert_eq!(Version::parse("1"), parse_error("Expected dot"));
         assert_eq!(Version::parse("1.2"), parse_error("Expected dot"));
         assert_eq!(
             Version::parse("1.2.3-"),
             parse_error("Error parsing prerelease")
-        );
+            );
         assert_eq!(
             Version::parse("a.b.c"),
             parse_error("Error parsing major identifier")
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3 abc"),
             parse_error("Extra junk after valid version:  abc")
-        );
+            );
 
         assert_eq!(
             Version::parse("1.2.3"),
@@ -429,10 +560,10 @@ mod tests {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: Vec::new(),
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
 
         assert_eq!(Version::parse("1.2.3"), Ok(Version::new(1, 2, 3)));
 
@@ -442,101 +573,101 @@ mod tests {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: Vec::new(),
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-alpha1"),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: Vec::new(),
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("  1.2.3-alpha1  "),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: Vec::new(),
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3+build5"),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("  1.2.3+build5  "),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-alpha1+build5"),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("  1.2.3-alpha1+build5  "),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-1.alpha1.9+build5.7.3aedf  "),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![
-                    Identifier::Numeric(1),
-                    Identifier::AlphaNumeric(String::from("alpha1")),
-                    Identifier::Numeric(9),
-                ],
-                build: vec![
-                    Identifier::AlphaNumeric(String::from("build5")),
-                    Identifier::Numeric(7),
-                    Identifier::AlphaNumeric(String::from("3aedf")),
-                ],
+                pre: Identifiers::Dynamic(vec![
+                Identifier::Numeric(1),
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1")),
+                Identifier::Numeric(9),
+                ]),
+                build: Identifiers::Dynamic(vec![
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("build5")),
+                Identifier::Numeric(7),
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("3aedf")),
+                ]),
             })
-        );
+            );
         assert_eq!(
             Version::parse("0.4.0-beta.1+0851523"),
             Ok(Version {
                 major: 0,
                 minor: 4,
                 patch: 0,
-                pre: vec![
-                    Identifier::AlphaNumeric(String::from("beta")),
-                    Identifier::Numeric(1),
-                ],
-                build: vec![Identifier::AlphaNumeric(String::from("0851523"))],
+                pre: Identifiers::Dynamic(vec![
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("beta")),
+                Identifier::Numeric(1),
+                ]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("0851523"))]),
             })
-        );
+            );
     }
 
     #[test]
@@ -600,15 +731,15 @@ mod tests {
         assert_eq!(
             Version::parse("1.2.3-alpha1"),
             Version::parse("1.2.3-alpha1")
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3+build.42"),
             Version::parse("1.2.3+build.42")
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-alpha1+42"),
             Version::parse("1.2.3-alpha1+42")
-        );
+            );
         assert_eq!(Version::parse("1.2.3+23"), Version::parse("1.2.3+42"));
     }
 
@@ -625,19 +756,19 @@ mod tests {
         assert_eq!(
             format!("{}", Version::parse("1.2.3").unwrap()),
             "1.2.3".to_string()
-        );
+            );
         assert_eq!(
             format!("{}", Version::parse("1.2.3-alpha1").unwrap()),
             "1.2.3-alpha1".to_string()
-        );
+            );
         assert_eq!(
             format!("{}", Version::parse("1.2.3+build.42").unwrap()),
             "1.2.3+build.42".to_string()
-        );
+            );
         assert_eq!(
             format!("{}", Version::parse("1.2.3-alpha1+42").unwrap()),
             "1.2.3-alpha1+42".to_string()
-        );
+            );
     }
 
     #[test]
@@ -653,19 +784,19 @@ mod tests {
         assert_eq!(
             Version::parse("1.2.3").unwrap().to_string(),
             "1.2.3".to_string()
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-alpha1").unwrap().to_string(),
             "1.2.3-alpha1".to_string()
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3+build.42").unwrap().to_string(),
             "1.2.3+build.42".to_string()
-        );
+            );
         assert_eq!(
             Version::parse("1.2.3-alpha1+42").unwrap().to_string(),
             "1.2.3-alpha1+42".to_string()
-        );
+            );
     }
 
     #[test]
@@ -721,14 +852,14 @@ mod tests {
     #[test]
     fn test_spec_order() {
         let vs = [
-            "1.0.0-alpha",
-            "1.0.0-alpha.1",
-            "1.0.0-alpha.beta",
-            "1.0.0-beta",
-            "1.0.0-beta.2",
-            "1.0.0-beta.11",
-            "1.0.0-rc.1",
-            "1.0.0",
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
         ];
         let mut i = 1;
         while i < vs.len() {
@@ -747,111 +878,111 @@ mod tests {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: Vec::new(),
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             "  1.2.3  ".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: Vec::new(),
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             "1.2.3-alpha1".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: Vec::new(),
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             "  1.2.3-alpha1  ".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: Vec::new(),
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Static(&[]),
             })
-        );
+            );
         assert_eq!(
             "1.2.3+build5".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             "  1.2.3+build5  ".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: Vec::new(),
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Static(&[]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             "1.2.3-alpha1+build5".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             "  1.2.3-alpha1+build5  ".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![Identifier::AlphaNumeric(String::from("alpha1"))],
-                build: vec![Identifier::AlphaNumeric(String::from("build5"))],
+                pre: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1"))]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("build5"))]),
             })
-        );
+            );
         assert_eq!(
             "1.2.3-1.alpha1.9+build5.7.3aedf  ".parse(),
             Ok(Version {
                 major: 1,
                 minor: 2,
                 patch: 3,
-                pre: vec![
-                    Identifier::Numeric(1),
-                    Identifier::AlphaNumeric(String::from("alpha1")),
-                    Identifier::Numeric(9),
-                ],
-                build: vec![
-                    Identifier::AlphaNumeric(String::from("build5")),
-                    Identifier::Numeric(7),
-                    Identifier::AlphaNumeric(String::from("3aedf")),
-                ],
+                pre: Identifiers::Dynamic(vec![
+                Identifier::Numeric(1),
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("alpha1")),
+                Identifier::Numeric(9),
+                ]),
+                build: Identifiers::Dynamic(vec![
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("build5")),
+                Identifier::Numeric(7),
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("3aedf")),
+                ]),
             })
-        );
+            );
         assert_eq!(
             "0.4.0-beta.1+0851523".parse(),
             Ok(Version {
                 major: 0,
                 minor: 4,
                 patch: 0,
-                pre: vec![
-                    Identifier::AlphaNumeric(String::from("beta")),
-                    Identifier::Numeric(1),
-                ],
-                build: vec![Identifier::AlphaNumeric(String::from("0851523"))],
+                pre: Identifiers::Dynamic(vec![
+                Identifier::AlphaNumeric(AlphaNumericValue::Static("beta")),
+                Identifier::Numeric(1),
+                ]),
+                build: Identifiers::Dynamic(vec![Identifier::AlphaNumeric(AlphaNumericValue::Static("0851523"))]),
             })
-        );
+            );
     }
 
     #[test]
@@ -868,10 +999,10 @@ mod tests {
         assert_eq!(
             "a.b.c".parse(),
             parse_error("Error parsing major identifier")
-        );
+            );
         assert_eq!(
             "1.2.3 abc".parse(),
             parse_error("Extra junk after valid version:  abc")
-        );
+            );
     }
 }

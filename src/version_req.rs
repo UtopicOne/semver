@@ -295,8 +295,9 @@ impl VersionReq {
     /// ```
     /// use semver::VersionReq;
     /// use semver::Version;
+    /// use semver::DynamicId;
     ///
-    /// let version = Version { major: 1, minor: 1, patch: 1, pre: vec![], build: vec![] };
+    /// let version = Version { major: 1, minor: 1, patch: 1, pre: DynamicId(vec![]), build: DynamicId(vec![]) };
     /// let exact = VersionReq::exact(&version);
     /// ```
     pub fn exact(version: &Version) -> VersionReq {
@@ -313,8 +314,9 @@ impl VersionReq {
     /// ```
     /// use semver::VersionReq;
     /// use semver::Version;
+    /// use semver::DynamicId;
     ///
-    /// let version = Version { major: 1, minor: 1, patch: 1, pre: vec![], build: vec![] };
+    /// let version = Version { major: 1, minor: 1, patch: 1, pre: DynamicId(vec![]), build: DynamicId(vec![]) };
     /// let exact = VersionReq::exact(&version);
     ///
     /// assert!(exact.matches(&version));
@@ -348,7 +350,7 @@ impl Predicate {
             major: version.major,
             minor: Some(version.minor),
             patch: Some(version.patch),
-            pre: version.pre.clone(),
+            pre: version.pre.as_raw(),
         }
     }
 
@@ -389,7 +391,7 @@ impl Predicate {
             None => return true,
         }
 
-        if self.pre != ver.pre {
+        if ver.pre != self.pre {
             return false;
         }
 
@@ -434,7 +436,7 @@ impl Predicate {
         }
 
         if !self.pre.is_empty() {
-            return ver.pre.is_empty() || ver.pre > self.pre;
+            return ver.pre.is_empty() || ver.pre.as_raw() > self.pre;
         }
 
         false
@@ -496,7 +498,7 @@ impl Predicate {
     }
 
     fn pre_is_compatible(&self, ver: &Version) -> bool {
-        ver.pre.is_empty() || ver.pre >= self.pre
+        ver.pre.is_empty() || ver.pre.as_raw() >= self.pre
     }
 
     // see https://www.npmjs.org/doc/misc/semver.html for behavior
